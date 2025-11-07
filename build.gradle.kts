@@ -52,6 +52,13 @@ tasks {
 
 dependencies {
     implementation("net.sourceforge.plantuml:plantuml:1.2024.5")
+    // YAML parsing
+    implementation("org.yaml:snakeyaml:2.2")
+    // JSON Schema validation
+    implementation("com.networknt:json-schema-validator:1.4.0")
+    // JSON processing
+    implementation("com.fasterxml.jackson.core:jackson-databind:2.17.2")
+    
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.mockito:mockito-core:5.14.2")
     testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.11.3")
