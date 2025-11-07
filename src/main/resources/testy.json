@@ -1,0 +1,194 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Testy Test Scenarios",
+  "description": "JSON Schema for testy functional testing framework scenarios",
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["name", "steps"],
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "Name of the test scenario"
+      },
+      "fixtures": {
+        "type": "array",
+        "description": "List of fixture files to load (without .yml extension)",
+        "items": {
+          "type": "string"
+        }
+      },
+      "mockServers": {
+        "type": "object",
+        "description": "HTTP mock servers configuration",
+        "additionalProperties": {
+          "type": "object",
+          "properties": {
+            "routes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["method", "path", "response"],
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+                    "description": "HTTP method"
+                  },
+                  "path": {
+                    "type": "string",
+                    "description": "URL path for the mock route"
+                  },
+                  "response": {
+                    "type": "object",
+                    "required": ["status"],
+                    "properties": {
+                      "status": {
+                        "type": "integer",
+                        "description": "HTTP status code",
+                        "minimum": 100,
+                        "maximum": 599
+                      },
+                      "headers": {
+                        "type": "object",
+                        "description": "Response headers",
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      "json": {
+                        "type": "string",
+                        "description": "JSON response body as string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "mockCalls": {
+        "type": "array",
+        "description": "Expected mock server calls verification",
+        "items": {
+          "type": "object",
+          "required": ["mock", "count"],
+          "properties": {
+            "mock": {
+              "type": "string",
+              "description": "Name of the mock server"
+            },
+            "count": {
+              "type": "integer",
+              "description": "Expected number of calls",
+              "minimum": 0
+            },
+            "expect": {
+              "type": "object",
+              "description": "Expected request properties",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+                },
+                "path": {
+                  "type": "string"
+                },
+                "body": {
+                  "type": "object",
+                  "properties": {
+                    "contains": {
+                      "type": "string",
+                      "description": "String that should be contained in request body"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "steps": {
+        "type": "array",
+        "description": "Test steps to execute",
+        "minItems": 1,
+        "items": {
+          "type": "object",
+          "required": ["name", "request", "response"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Unique step name (used for referencing in placeholders)"
+            },
+            "request": {
+              "type": "object",
+              "required": ["method", "path"],
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE", "CONNECT"],
+                  "description": "HTTP method"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Request path (supports placeholders like {{step.response.field}})"
+                },
+                "headers": {
+                  "type": "object",
+                  "description": "Request headers (supports placeholders)",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "description": "Request body (any valid JSON/YAML, supports placeholders)"
+                }
+              }
+            },
+            "response": {
+              "type": "object",
+              "required": ["status"],
+              "properties": {
+                "status": {
+                  "type": "integer",
+                  "description": "Expected HTTP status code",
+                  "minimum": 100,
+                  "maximum": 599
+                },
+                "headers": {
+                  "type": "object",
+                  "description": "Expected response headers",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "json": {
+                  "type": "string",
+                  "description": "Expected JSON response body (supports jsonassert placeholders like <<PRESENCE>>)"
+                }
+              }
+            },
+            "dbChecks": {
+              "type": "array",
+              "description": "Database assertions to run after the step",
+              "items": {
+                "type": "object",
+                "required": ["query", "result"],
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "SQL query to execute (supports placeholders)"
+                  },
+                  "result": {
+                    "description": "Expected result as JSON array or YAML"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
