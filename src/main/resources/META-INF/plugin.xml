@@ -1,5 +1,5 @@
 <idea-plugin>
-  <id>com.testy.goland.viewer</id>
+  <id>com.testy.tests.viewer</id>
   <name>Testy Tests Viewer</name>
   <vendor email="roman.chudov@gmail.com" url="https://github.com/rom8726/testy-goland-plugin">Chudov Roman</vendor>
   <version>0.1.0</version>
