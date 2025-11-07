@@ -1,0 +1,28 @@
+<idea-plugin>
+  <id>com.testy.goland.viewer</id>
+  <name>Testy Tests Viewer</name>
+  <vendor email="roman.chudov@gmail.com" url="https://github.com/rom8726/testy-goland-plugin">Chudov Roman</vendor>
+  <version>0.1.0</version>
+  <idea-version since-build="252.0" until-build="253.*"/>
+  <description><![CDATA[
+    Visual viewer for Testy YAML scenarios — provides structured tree and color highlighting.
+  ]]></description>
+  <change-notes><![CDATA[
+    0.1.0
+    - Initial public preview release.
+  ]]></change-notes>
+
+  <depends>com.intellij.modules.platform</depends>
+  <depends>org.jetbrains.plugins.go</depends>
+  <depends>org.jetbrains.plugins.yaml</depends>
+
+  <extensions defaultExtensionNs="com.intellij">
+<!--    <projectService serviceImplementation="com.testy.plugin.services.FlowModelService"/>-->
+<!--    <toolWindow id="testy" factoryClass="com.testy.plugin.ui.testyToolWindowFactory" anchor="right" icon="AllIcons.Actions.ListFiles"/>-->
+    <fileTypeFactory implementation="com.testy.plugin.TestyFileTypeFactory"/>
+    <fileEditorProvider implementation="com.testy.plugin.TestyViewerEditorProvider"/>
+  </extensions>
+
+  <actions>
+  </actions>
+</idea-plugin>

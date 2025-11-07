@@ -21,7 +21,10 @@ intellij {
     type.set("GO")
     version.set("2025.2")
 
-    plugins.set(listOf("org.jetbrains.plugins.go"))
+    plugins.set(listOf(
+        "org.jetbrains.plugins.go",
+        "org.jetbrains.plugins.yaml",
+    ))
 }
 
 tasks {
@@ -55,6 +58,7 @@ dependencies {
     implementation("net.sourceforge.plantuml:plantuml:1.2024.5")
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
     testRuntimeOnly("org.junit.platform:junit-platform-console:1.11.3")
+
 }
 
 tasks.register<JavaExec>("unitTest") {
