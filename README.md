@@ -14,6 +14,8 @@ Visual viewer for Testy YAML test scenarios in GoLand IDE. Provides structured t
 - **Context Menu**: Right-click for additional actions (Reveal in Editor, Copy JSON Pointer, Expand/Collapse)
 - **Toolbar**: Quick access to Refresh, Expand All, and Collapse All actions
 
+<img src="docs/plugin.png" width="800" />
+
 ## Supported Format
 
 The plugin supports `.testy.yml` and `.testy.yaml` files following the Testy test framework specification:
