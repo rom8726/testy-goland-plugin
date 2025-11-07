@@ -2,6 +2,7 @@ package com.testy.plugin
 
 import com.intellij.openapi.fileTypes.LanguageFileType
 import com.intellij.openapi.util.IconLoader
+import org.jetbrains.yaml.YAMLLanguage
 import javax.swing.Icon
 
 object TestyFileType : LanguageFileType(YAMLLanguage.INSTANCE) {

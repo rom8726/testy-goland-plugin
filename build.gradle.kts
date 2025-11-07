@@ -3,11 +3,6 @@ plugins {
     kotlin("jvm") version "2.2.0"
 }
 
-// Prevent IntelliJ Gradle plugin from trying to resolve a real IDE during unit tests
-val isTestTask = gradle.startParameter.taskNames.any { it.contains("test", ignoreCase = true) }
-if (isTestTask) {
-    System.setProperty("idea.home.path", project.layout.projectDirectory.dir(".fake-ide").asFile.absolutePath)
-}
 
 group = "com.testy"
 version = "0.1.0"
@@ -50,15 +45,17 @@ tasks {
     }
 
     test {
-        useJUnitPlatform()
+        // Disable default Gradle test task since IntelliJ Gradle plugin injects IDE args that break pure unit tests
+        enabled = false
     }
 }
 
 dependencies {
     implementation("net.sourceforge.plantuml:plantuml:1.2024.5")
-    testImplementation("org.junit.jupiter:junit-jupiter:5.11.3")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.mockito:mockito-core:5.14.2")
+    testRuntimeOnly("org.junit.vintage:junit-vintage-engine:5.11.3")
     testRuntimeOnly("org.junit.platform:junit-platform-console:1.11.3")
-
 }
 
 tasks.register<JavaExec>("unitTest") {

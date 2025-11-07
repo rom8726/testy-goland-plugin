@@ -23,6 +23,8 @@ class TestyViewerEditorProvider : FileEditorProvider {
             override fun isModified() = false
             override fun isValid() = true
 
+            override fun getFile(): VirtualFile = file
+
             override fun <T : Any?> getUserData(key: Key<T>): T? = null
             override fun <T : Any?> putUserData(key: Key<T>, value: T?) {}
             override fun addPropertyChangeListener(listener: PropertyChangeListener) {}
