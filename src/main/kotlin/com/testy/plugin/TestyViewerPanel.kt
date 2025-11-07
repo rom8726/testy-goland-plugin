@@ -6,10 +6,15 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiManager
 import com.intellij.ui.ColoredTreeCellRenderer
+import com.intellij.ui.JBColor
 import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.treeStructure.Tree
+import com.testy.plugin.ui.MethodBadgeRenderer
+import com.testy.plugin.export.TestyMarkdownExporter
+import com.testy.plugin.export.ExportDialog
 import java.awt.Color
 import java.awt.Toolkit
+import java.io.File
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.*
@@ -43,6 +48,11 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
     private val fileRef = file
     private var refreshTimer: Timer? = null
     private val debounceDelay = 300L // milliseconds
+    private val detailsPanel = TestyDetailsPanel()
+    private val progressBar = JProgressBar().apply {
+        isStringPainted = true
+        isVisible = false
+    }
 
     init {
         layout = java.awt.BorderLayout()
@@ -65,9 +75,56 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
         collapseAllButton.addActionListener { collapseAll() }
         toolbar.add(collapseAllButton)
         
+        toolbar.addSeparator()
+        toolbar.add(progressBar)
+        
+        val exportButton = JButton(AllIcons.Actions.Upload)
+        exportButton.text = "Export"
+        exportButton.toolTipText = "Export to Markdown"
+        exportButton.addActionListener { exportToMarkdown() }
+        toolbar.add(exportButton)
+        
         add(toolbar, java.awt.BorderLayout.NORTH)
-        add(JScrollPane(tree), java.awt.BorderLayout.CENTER)
+        
+        // Split pane with tree and details panel
+        val splitPane = JSplitPane(JSplitPane.HORIZONTAL_SPLIT, JScrollPane(tree), detailsPanel)
+        splitPane.dividerLocation = 400
+        splitPane.isOneTouchExpandable = true
+        add(splitPane, java.awt.BorderLayout.CENTER)
+        
         tree.cellRenderer = Renderer()
+        tree.toolTipText = null // Enable tooltips
+        
+        // Selection listener for details panel
+        tree.selectionModel.addTreeSelectionListener { e ->
+            val selectedPath = e.newLeadSelectionPath ?: return@addTreeSelectionListener
+            val selectedNode = selectedPath.lastPathComponent as? DefaultMutableTreeNode ?: return@addTreeSelectionListener
+            val nodeData = selectedNode.userObject as? TreeNodeData ?: return@addTreeSelectionListener
+            
+            when (nodeData) {
+                is TreeNodeData.Step -> detailsPanel.showStep(nodeData.step)
+                is TreeNodeData.DbCheckItem -> detailsPanel.showDbCheck(nodeData.check, nodeData.index)
+                is TreeNodeData.Scenario -> detailsPanel.showScenario(nodeData.scenario)
+                is TreeNodeData.Error -> detailsPanel.showError(nodeData.error)
+                is TreeNodeData.MocksSummary -> {
+                    // Try to find the scenario
+                    val scenarioNode = findParentScenarioNode(selectedPath)
+                    if (scenarioNode != null) {
+                        val scenarioData = scenarioNode.userObject as? TreeNodeData.Scenario
+                        scenarioData?.let { detailsPanel.showScenario(it.scenario) }
+                    }
+                }
+                else -> detailsPanel.showEmptyState()
+            }
+        }
+        
+        // Tooltip support
+        object : MouseAdapter() {
+            override fun mouseMoved(e: MouseEvent) {
+                val tooltip = getToolTipForEvent(e)
+                tree.toolTipText = tooltip
+            }
+        }.let { tree.addMouseMotionListener(it) }
         
         // Double click navigation
         tree.addMouseListener(object : MouseAdapter() {
@@ -162,6 +219,18 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
         return null
     }
     
+    private fun findParentScenarioNode(path: TreePath): DefaultMutableTreeNode? {
+        val pathArray = path.path
+        for (i in pathArray.size - 1 downTo 0) {
+            val node = pathArray[i] as? DefaultMutableTreeNode ?: continue
+            val nodeData = node.userObject as? TreeNodeData
+            if (nodeData is TreeNodeData.Scenario) {
+                return node
+            }
+        }
+        return null
+    }
+    
     private fun navigateToSelectedNode() {
         val selectedPath = tree.selectionPath ?: return
         val selectedNode = selectedPath.lastPathComponent as? DefaultMutableTreeNode ?: return
@@ -238,6 +307,10 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
     }
 
     fun refreshTree() {
+        progressBar.isVisible = true
+        progressBar.isIndeterminate = true
+        progressBar.string = "Parsing..."
+        
         // Save expansion state
         val expandedPaths = mutableSetOf<TreePath>()
         var row = 0
@@ -253,6 +326,8 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
         val selectedPath = tree.selectionPath
         
         root.removeAllChildren()
+        
+        progressBar.string = "Validating..."
         
         val psiFile = try {
             PsiManager.getInstance(projectRef).findFile(fileRef)
@@ -382,6 +457,74 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
         
         // Expand root by default
         tree.expandRow(0)
+        
+        progressBar.isVisible = false
+        progressBar.isIndeterminate = false
+    }
+    
+    private fun exportToMarkdown() {
+        val psiFile = PsiManager.getInstance(projectRef).findFile(fileRef) ?: return
+        val scenarios = TestyYamlParser.parse(psiFile)
+        val yamlContent = psiFile.text
+        val errors = TestySchemaValidator.validate(yamlContent, psiFile)
+        
+        val dialog = ExportDialog(projectRef, fileRef.nameWithoutExtension)
+        if (dialog.showAndGet()) {
+            val format = dialog.getSelectedFormat()
+            val file = dialog.getSelectedFile()
+            
+            try {
+                when (format) {
+                    "markdown" -> {
+                        val markdown = TestyMarkdownExporter.export(scenarios, fileRef.name, errors)
+                        file.writeText(markdown)
+                        com.intellij.openapi.ui.Messages.showInfoMessage(
+                            projectRef,
+                            "Exported successfully to:\n${file.absolutePath}",
+                            "Export Complete"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                com.intellij.openapi.ui.Messages.showErrorDialog(
+                    projectRef,
+                    "Failed to export: ${e.message}",
+                    "Export Error"
+                )
+            }
+        }
+    }
+    
+    private fun getToolTipForEvent(event: java.awt.event.MouseEvent): String? {
+        val path = tree.getPathForLocation(event.x, event.y) ?: return null
+        val node = path.lastPathComponent as? DefaultMutableTreeNode ?: return null
+        val nodeData = node.userObject as? TreeNodeData ?: return null
+        
+        return when (nodeData) {
+            is TreeNodeData.Step -> {
+                val formatter = TestyDataFormatter
+                val preview = "Request: ${nodeData.step.request.method} ${nodeData.step.request.path}\n" +
+                        "Response: ${nodeData.step.response.status}\n" +
+                        if (nodeData.step.request.body != null) {
+                            "Body: ${formatter.truncate(nodeData.step.request.body.toString(), 100)}"
+                        } else {
+                            ""
+                        }
+                preview.trim()
+            }
+            is TreeNodeData.DbCheckItem -> {
+                "Query: ${TestyDataFormatter.truncate(nodeData.check.query, 150)}"
+            }
+            is TreeNodeData.Error -> {
+                nodeData.error.message
+            }
+            is TreeNodeData.Scenario -> {
+                "Scenario: ${nodeData.scenario.name}\n" +
+                        "Steps: ${nodeData.scenario.steps.size}\n" +
+                        if (nodeData.errorCount > 0) "Errors: ${nodeData.errorCount}" else ""
+            }
+            else -> null
+        }
     }
 
     private class Renderer : ColoredTreeCellRenderer() {
@@ -417,10 +560,11 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
                 
                 is TreeNodeData.Step -> {
                     val method = node.step.request.method
-                    val methodColor = getMethodColor(method)
+                    val methodColor = MethodBadgeRenderer.getMethodColor(method)
                     val status = node.step.response.status
                     val statusColor = getStatusColor(status)
                     
+                    // Use badge-like appearance with bold colored text
                     append("$method ", SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, methodColor))
                     append(node.step.request.path, SimpleTextAttributes.REGULAR_ATTRIBUTES)
                     append(" → ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
@@ -467,22 +611,14 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
                     }
                     val attrs = when (node.error.severity) {
                         ValidationSeverity.ERROR -> SimpleTextAttributes.ERROR_ATTRIBUTES
-                        ValidationSeverity.WARNING -> SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, Color.ORANGE)
+                        ValidationSeverity.WARNING -> SimpleTextAttributes(
+                            SimpleTextAttributes.STYLE_PLAIN, 
+                            Color.ORANGE
+                        )
                         ValidationSeverity.INFO -> SimpleTextAttributes.REGULAR_ATTRIBUTES
                     }
                     append(node.error.message, attrs)
                 }
-            }
-        }
-        
-        private fun getMethodColor(method: String): Color {
-            return when (method.uppercase()) {
-                "GET" -> Color(0x2196F3) // Blue
-                "POST" -> Color(0x4CAF50) // Green
-                "PUT" -> Color(0x8BC34A) // Light Green/Olive
-                "PATCH" -> Color(0x9C27B0) // Purple
-                "DELETE" -> Color(0xF44336) // Red
-                else -> Color.GRAY
             }
         }
         
@@ -491,7 +627,7 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
                 status in 200..299 -> Color(0x4CAF50) // Green
                 status in 400..499 -> Color(0xFF9800) // Orange
                 status in 500..599 -> Color(0xF44336) // Red
-                else -> Color.GRAY
+                else -> JBColor.GRAY
             }
         }
     }

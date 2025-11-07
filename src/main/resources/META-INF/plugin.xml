@@ -17,10 +17,11 @@
   <depends>org.jetbrains.plugins.yaml</depends>
 
   <extensions defaultExtensionNs="com.intellij">
-<!--    <projectService serviceImplementation="com.testy.plugin.services.FlowModelService"/>-->
-<!--    <toolWindow id="testy" factoryClass="com.testy.plugin.ui.testyToolWindowFactory" anchor="right" icon="AllIcons.Actions.ListFiles"/>-->
     <fileTypeFactory implementation="com.testy.plugin.TestyFileTypeFactory"/>
     <fileEditorProvider implementation="com.testy.plugin.TestyViewerEditorProvider"/>
+    <annotator language="yaml" implementationClass="com.testy.plugin.annotator.TestyAnnotator"/>
+    <completion.contributor language="yaml" implementationClass="com.testy.plugin.completion.TestyCompletionContributor"/>
+    <foldingBuilder language="yaml" implementationClass="com.testy.plugin.folding.TestyFoldingBuilder"/>
   </extensions>
 
   <actions>
