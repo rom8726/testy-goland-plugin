@@ -35,17 +35,13 @@ The plugin supports `.testy.yml` and `.testy.yaml` files following the Testy tes
 
 ## Usage
 
-1. Open a `.testy.yml` or `.testy.yaml` file in GoLand
-2. The Testy Viewer panel will automatically open alongside the editor
-3. Use the tree view to navigate through scenarios and steps
-4. Double-click any node to jump to its location in the YAML file
-5. Validation errors are displayed in red with navigation support
-
-## Installation
-
-1. Build the plugin: `./gradlew buildPlugin`
-2. Install from disk in GoLand: Settings → Plugins → Install Plugin from Disk
-3. Select the generated `build/distributions/testy-goland-plugin.zip`
+1. Install **Testy Tests Viewer** from [JetBrains Marketplace](https://plugins.jetbrains.com/)
+   *(or manually via “Install Plugin from Disk…” and select `testy-goland-plugin.zip`)*
+2. Open a `.testy.yml` or `.testy.yaml` file in GoLand
+3. The Testy Viewer panel will automatically open alongside the editor
+4. Use the tree view to navigate through scenarios and steps
+5. Double-click any node to jump to its location in the YAML file
+6. Validation errors are displayed in red with navigation support
 
 ## Known Limitations
 
