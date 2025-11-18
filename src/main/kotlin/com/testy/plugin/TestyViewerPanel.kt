@@ -47,12 +47,13 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
     private val projectRef = project
     private val fileRef = file
     private var refreshTimer: Timer? = null
-    private val debounceDelay = 300L // milliseconds
+    private val debounceDelay = 500L // milliseconds - increased for better performance
     private val detailsPanel = TestyDetailsPanel()
     private val progressBar = JProgressBar().apply {
         isStringPainted = true
         isVisible = false
     }
+    private var isRefreshing = false // Prevent concurrent refreshes
 
     init {
         layout = java.awt.BorderLayout()
@@ -307,6 +308,12 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
     }
 
     fun refreshTree() {
+        // PERFORMANCE FIX: Prevent concurrent refreshes that can stack up
+        if (isRefreshing) {
+            return
+        }
+        isRefreshing = true
+        
         progressBar.isVisible = true
         progressBar.isIndeterminate = true
         progressBar.string = "Parsing..."
@@ -342,6 +349,8 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
                 )
             )))
             tree.model = DefaultTreeModel(root)
+            progressBar.isVisible = false
+            isRefreshing = false
             return
         }
         
@@ -358,6 +367,8 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
                 )
             )))
             tree.model = DefaultTreeModel(root)
+            progressBar.isVisible = false
+            isRefreshing = false
             return
         }
         
@@ -460,6 +471,7 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
         
         progressBar.isVisible = false
         progressBar.isIndeterminate = false
+        isRefreshing = false // Allow next refresh
     }
     
     private fun exportToMarkdown() {

@@ -4,14 +4,22 @@ import com.intellij.lang.annotation.AnnotationHolder
 import com.intellij.lang.annotation.Annotator
 import com.intellij.lang.annotation.HighlightSeverity
 import com.intellij.psi.PsiElement
+import com.intellij.psi.util.CachedValueProvider
+import com.intellij.psi.util.CachedValuesManager
+import com.intellij.psi.util.PsiModificationTracker
 import com.intellij.psi.util.elementType
 import com.testy.plugin.TestySchemaValidator
+import com.testy.plugin.ValidationError
 import com.testy.plugin.ValidationSeverity
 import org.jetbrains.yaml.YAMLElementTypes
 import org.jetbrains.yaml.psi.YAMLFile
 
 class TestyAnnotator : Annotator {
     override fun annotate(element: PsiElement, holder: AnnotationHolder) {
+        // Only run validation once per file, not for every element
+        // The annotator is called for EVERY PSI element in the file, which causes
+        // massive performance issues when there are many .testy files
+        
         val file = element.containingFile as? YAMLFile ?: return
         
         // Only annotate testy files
@@ -20,12 +28,21 @@ class TestyAnnotator : Annotator {
             return
         }
         
-        // Validate the file
-        val yamlContent = file.text
-        val validationErrors = try {
-            TestySchemaValidator.validate(yamlContent, file)
-        } catch (e: Exception) {
+        // Only validate at the file level (when element is the file itself)
+        // This prevents validating the entire file for every single PSI element
+        if (element != file) {
             return
+        }
+        
+        // Cache validation results to avoid re-validating on every annotate call
+        val validationErrors = CachedValuesManager.getCachedValue(file) {
+            val yamlContent = file.text
+            val errors = try {
+                TestySchemaValidator.validate(yamlContent, file)
+            } catch (e: Exception) {
+                emptyList<ValidationError>()
+            }
+            CachedValueProvider.Result.create(errors, PsiModificationTracker.MODIFICATION_COUNT)
         }
         
         // Map errors to PSI elements

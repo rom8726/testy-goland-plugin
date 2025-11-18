@@ -13,6 +13,13 @@ class TestyCompletionProvider : CompletionProvider<CompletionParameters>() {
         context: ProcessingContext,
         result: CompletionResultSet
     ) {
+        // Only provide completions for .testy files
+        val file = parameters.originalFile
+        val fileName = file.name
+        if (!fileName.endsWith(".testy.yaml") && !fileName.endsWith(".testy.yml")) {
+            return
+        }
+        
         val element = parameters.position
         val parent = element.parent
         
