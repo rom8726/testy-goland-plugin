@@ -11,11 +11,110 @@
         "type": "string",
         "description": "Name of the test scenario"
       },
+      "variables": {
+        "type": "object",
+        "description": "Test-level variables (key-value pairs)",
+        "additionalProperties": true
+      },
       "fixtures": {
         "type": "array",
         "description": "List of fixture files to load (without .yml extension)",
         "items": {
           "type": "string"
+        }
+      },
+      "setup": {
+        "type": "array",
+        "description": "Setup hooks executed before test steps",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Optional hook name for logging"
+            },
+            "sql": {
+              "type": "string",
+              "description": "SQL query to execute (supports placeholders)"
+            },
+            "http": {
+              "type": "object",
+              "description": "HTTP request hook",
+              "required": ["method", "path"],
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+                  "description": "HTTP method"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Request path (supports placeholders)"
+                },
+                "headers": {
+                  "type": "object",
+                  "description": "Request headers (supports placeholders)",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "description": "Request body (any valid JSON/YAML, supports placeholders)"
+                }
+              }
+            }
+          },
+          "oneOf": [
+            {"required": ["sql"]},
+            {"required": ["http"]}
+          ]
+        }
+      },
+      "teardown": {
+        "type": "array",
+        "description": "Teardown hooks executed after test steps (even on failure)",
+        "items": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string",
+              "description": "Optional hook name for logging"
+            },
+            "sql": {
+              "type": "string",
+              "description": "SQL query to execute (supports placeholders)"
+            },
+            "http": {
+              "type": "object",
+              "description": "HTTP request hook",
+              "required": ["method", "path"],
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
+                  "description": "HTTP method"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Request path (supports placeholders)"
+                },
+                "headers": {
+                  "type": "object",
+                  "description": "Request headers (supports placeholders)",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "body": {
+                  "description": "Request body (any valid JSON/YAML, supports placeholders)"
+                }
+              }
+            }
+          },
+          "oneOf": [
+            {"required": ["sql"]},
+            {"required": ["http"]}
+          ]
         }
       },
       "mockServers": {
@@ -115,11 +214,96 @@
         "minItems": 1,
         "items": {
           "type": "object",
-          "required": ["name", "request", "response"],
+          "required": ["name"],
           "properties": {
             "name": {
               "type": "string",
               "description": "Unique step name (used for referencing in placeholders)"
+            },
+            "when": {
+              "type": "string",
+              "description": "Conditional execution expression (e.g., '{{status}} == active', '{{age}} >= 18')"
+            },
+            "loop": {
+              "type": "object",
+              "description": "Loop configuration for iterating over items or range",
+              "properties": {
+                "items": {
+                  "description": "Array of items to iterate over",
+                  "type": "array"
+                },
+                "var": {
+                  "type": "string",
+                  "description": "Variable name for current item in loop"
+                },
+                "range": {
+                  "type": "object",
+                  "description": "Numeric range to iterate over",
+                  "required": ["from", "to"],
+                  "properties": {
+                    "from": {
+                      "type": "integer",
+                      "description": "Start value (inclusive)"
+                    },
+                    "to": {
+                      "type": "integer",
+                      "description": "End value (inclusive)"
+                    },
+                    "step": {
+                      "type": "integer",
+                      "description": "Step increment (default: 1)",
+                      "default": 1,
+                      "minimum": 1
+                    }
+                  }
+                }
+              },
+              "oneOf": [
+                {"required": ["items", "var"]},
+                {"required": ["range", "var"]}
+              ]
+            },
+            "retry": {
+              "type": "object",
+              "description": "Retry configuration for failed requests",
+              "required": ["attempts"],
+              "properties": {
+                "attempts": {
+                  "type": "integer",
+                  "description": "Maximum number of attempts (including first try)",
+                  "minimum": 1
+                },
+                "backoff": {
+                  "type": "string",
+                  "enum": ["constant", "linear", "exponential"],
+                  "description": "Backoff strategy",
+                  "default": "exponential"
+                },
+                "initialDelay": {
+                  "type": "string",
+                  "description": "Initial delay before first retry (e.g., '100ms', '1s')",
+                  "pattern": "^\\d+(ms|s|m|h)$"
+                },
+                "maxDelay": {
+                  "type": "string",
+                  "description": "Maximum delay for exponential backoff (e.g., '10s', '1m')",
+                  "pattern": "^\\d+(ms|s|m|h)$"
+                },
+                "retryOn": {
+                  "type": "array",
+                  "description": "Retry only on these HTTP status codes",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 100,
+                    "maximum": 599
+                  }
+                },
+                "retryOnError": {
+                  "type": "boolean",
+                  "description": "Retry on any error (network, timeout, etc.)",
+                  "default": false
+                }
+              }
             },
             "request": {
               "type": "object",
@@ -142,7 +326,15 @@
                   }
                 },
                 "body": {
-                  "description": "Request body (any valid JSON/YAML, supports placeholders)"
+                  "description": "Request body (any valid JSON/YAML, supports placeholders and faker functions like {{faker.name}}, {{faker.email}})"
+                },
+                "bodyFile": {
+                  "type": "string",
+                  "description": "Path to file containing request body"
+                },
+                "bodyRaw": {
+                  "type": "string",
+                  "description": "Raw request body as string"
                 }
               }
             },
@@ -166,6 +358,209 @@
                 "json": {
                   "type": "string",
                   "description": "Expected JSON response body (supports jsonassert placeholders like <<PRESENCE>>)"
+                },
+                "text": {
+                  "type": "string",
+                  "description": "Expected text response body"
+                },
+                "schema": {
+                  "type": "string",
+                  "description": "Path to external JSON Schema file for validation"
+                },
+                "jsonSchema": {
+                  "description": "Inline JSON Schema (Draft 7) for response validation",
+                  "type": "object"
+                },
+                "assertions": {
+                  "type": "array",
+                  "description": "Enhanced assertions for response validation",
+                  "items": {
+                    "type": "object",
+                    "required": ["path", "operator"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "JSON path to value (supports dot notation and array indexing, e.g., 'users[0].age')"
+                      },
+                      "operator": {
+                        "type": "string",
+                        "enum": [
+                          "equals", "eq", "==",
+                          "notEquals", "ne", "!=",
+                          "greaterThan", "gt", ">",
+                          "lessThan", "lt", "<",
+                          "greaterOrEqual", "gte", ">=",
+                          "lessOrEqual", "lte", "<=",
+                          "between",
+                          "contains",
+                          "notContains",
+                          "matches",
+                          "startsWith",
+                          "endsWith",
+                          "in",
+                          "notIn",
+                          "isEmpty",
+                          "isNotEmpty",
+                          "hasLength",
+                          "hasMinLength",
+                          "hasMaxLength"
+                        ],
+                        "description": "Assertion operator"
+                      },
+                      "value": {
+                        "description": "Expected value (for 'between' operator: array [min, max])"
+                      },
+                      "message": {
+                        "type": "string",
+                        "description": "Optional custom error message"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "grpcRequest": {
+              "type": "object",
+              "description": "gRPC request specification",
+              "required": ["service", "method"],
+              "properties": {
+                "service": {
+                  "type": "string",
+                  "description": "gRPC service name (e.g., 'users.UserService', supports placeholders)"
+                },
+                "method": {
+                  "type": "string",
+                  "description": "gRPC method name (e.g., 'CreateUser', 'GetUser', supports placeholders)"
+                },
+                "message": {
+                  "type": "object",
+                  "description": "Request message as key-value map (supports placeholders and faker functions like {{faker.name}}, {{faker.email}})",
+                  "additionalProperties": true
+                },
+                "metadata": {
+                  "type": "object",
+                  "description": "gRPC metadata (headers) as key-value pairs (supports placeholders)",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "grpcResponse": {
+              "type": "object",
+              "description": "Expected gRPC response",
+              "required": ["code"],
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "OK",
+                    "CANCELLED", "Cancelled",
+                    "UNKNOWN", "Unknown",
+                    "INVALID_ARGUMENT", "InvalidArgument",
+                    "DEADLINE_EXCEEDED", "DeadlineExceeded",
+                    "NOT_FOUND", "NotFound",
+                    "ALREADY_EXISTS", "AlreadyExists",
+                    "PERMISSION_DENIED", "PermissionDenied",
+                    "RESOURCE_EXHAUSTED", "ResourceExhausted",
+                    "FAILED_PRECONDITION", "FailedPrecondition",
+                    "ABORTED", "Aborted",
+                    "OUT_OF_RANGE", "OutOfRange",
+                    "UNIMPLEMENTED", "Unimplemented",
+                    "INTERNAL", "Internal",
+                    "UNAVAILABLE", "Unavailable",
+                    "DATA_LOSS", "DataLoss",
+                    "UNAUTHENTICATED", "Unauthenticated"
+                  ],
+                  "description": "Expected gRPC status code"
+                },
+                "message": {
+                  "type": "string",
+                  "description": "Expected response message as JSON string (supports jsonassert placeholders like <<PRESENCE>> and variable substitution like {{step.response.field}})"
+                },
+                "metadata": {
+                  "type": "object",
+                  "description": "Expected gRPC metadata (headers) as key-value pairs",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "assertions": {
+                  "type": "array",
+                  "description": "Enhanced assertions for response validation",
+                  "items": {
+                    "type": "object",
+                    "required": ["path", "operator"],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "JSON path to value (supports dot notation and array indexing, e.g., 'users[0].age')"
+                      },
+                      "operator": {
+                        "type": "string",
+                        "enum": [
+                          "equals", "eq", "==",
+                          "notEquals", "ne", "!=",
+                          "greaterThan", "gt", ">",
+                          "lessThan", "lt", "<",
+                          "greaterOrEqual", "gte", ">=",
+                          "lessOrEqual", "lte", "<=",
+                          "between",
+                          "contains",
+                          "notContains",
+                          "matches",
+                          "startsWith",
+                          "endsWith",
+                          "in",
+                          "notIn",
+                          "isEmpty",
+                          "isNotEmpty",
+                          "hasLength",
+                          "hasMinLength",
+                          "hasMaxLength"
+                        ],
+                        "description": "Assertion operator"
+                      },
+                      "value": {
+                        "description": "Expected value (for 'between' operator: array [min, max])"
+                      },
+                      "message": {
+                        "type": "string",
+                        "description": "Optional custom error message"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "performance": {
+              "type": "object",
+              "description": "Performance constraints for the request",
+              "properties": {
+                "maxDuration": {
+                  "type": "string",
+                  "description": "Maximum allowed duration (e.g., '500ms', '1s')",
+                  "pattern": "^\\d+(ms|s|m|h)$"
+                },
+                "warnDuration": {
+                  "type": "string",
+                  "description": "Warning threshold for duration (e.g., '200ms', '500ms')",
+                  "pattern": "^\\d+(ms|s|m|h)$"
+                },
+                "failOnWarning": {
+                  "type": "boolean",
+                  "description": "Fail test if warning threshold is exceeded",
+                  "default": false
+                },
+                "maxMemory": {
+                  "type": "integer",
+                  "description": "Maximum memory usage in MB",
+                  "minimum": 1
+                },
+                "minThroughput": {
+                  "type": "integer",
+                  "description": "Minimum requests per second (for batch operations)",
+                  "minimum": 1
                 }
               }
             },
@@ -181,12 +576,16 @@
                     "description": "SQL query to execute (supports placeholders)"
                   },
                   "result": {
-                    "description": "Expected result as JSON array or YAML"
+                    "description": "Expected result as JSON array or YAML (supports placeholders)"
                   }
                 }
               }
             }
-          }
+          },
+          "oneOf": [
+            {"required": ["request", "response"]},
+            {"required": ["grpcRequest", "grpcResponse"]}
+          ]
         }
       }
     }

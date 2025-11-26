@@ -5,32 +5,130 @@ import org.jetbrains.yaml.psi.*
 
 data class TestyScenario(
     val name: String,
+    val variables: Map<String, Any?>? = null,
     val fixtures: List<String>? = null,
+    val setup: List<Hook>? = null,
+    val teardown: List<Hook>? = null,
     val mockServers: Map<String, MockServer>? = null,
     val mockCalls: List<MockCall>? = null,
     val steps: List<TestyStep> = emptyList(),
     val offset: Int
 )
 
-data class TestyStep(
-    val name: String,
-    val request: Request,
-    val response: Response,
-    val dbChecks: List<DbCheck>? = null,
-    val offset: Int
+data class Hook(
+    val name: String? = null,
+    val sql: String? = null,
+    val http: HookHttp? = null
 )
 
-data class Request(
+data class HookHttp(
     val method: String,
     val path: String,
     val headers: Map<String, String>? = null,
     val body: Any? = null
 )
 
+sealed class TestyStep {
+    abstract val name: String
+    abstract val condition: String?
+    abstract val loop: Loop?
+    abstract val retry: Retry?
+    abstract val performance: Performance?
+    abstract val dbChecks: List<DbCheck>?
+    abstract val offset: Int
+
+    data class HttpStep(
+        override val name: String,
+        override val condition: String? = null,
+        override val loop: Loop? = null,
+        override val retry: Retry? = null,
+        override val performance: Performance? = null,
+        val request: Request,
+        val response: Response,
+        override val dbChecks: List<DbCheck>? = null,
+        override val offset: Int
+    ) : TestyStep()
+
+    data class GrpcStep(
+        override val name: String,
+        override val condition: String? = null,
+        override val loop: Loop? = null,
+        override val retry: Retry? = null,
+        override val performance: Performance? = null,
+        val grpcRequest: GrpcRequest,
+        val grpcResponse: GrpcResponse,
+        override val dbChecks: List<DbCheck>? = null,
+        override val offset: Int
+    ) : TestyStep()
+}
+
+data class Loop(
+    val items: List<Any>? = null,
+    val variable: String,
+    val range: LoopRange? = null
+)
+
+data class LoopRange(
+    val from: Int,
+    val to: Int,
+    val step: Int = 1
+)
+
+data class Retry(
+    val attempts: Int,
+    val backoff: String? = null,
+    val initialDelay: String? = null,
+    val maxDelay: String? = null,
+    val retryOn: List<Int>? = null,
+    val retryOnError: Boolean = false
+)
+
+data class Performance(
+    val maxDuration: String? = null,
+    val warnDuration: String? = null,
+    val failOnWarning: Boolean = false,
+    val maxMemory: Int? = null,
+    val minThroughput: Int? = null
+)
+
+data class Request(
+    val method: String,
+    val path: String,
+    val headers: Map<String, String>? = null,
+    val body: Any? = null,
+    val bodyFile: String? = null,
+    val bodyRaw: String? = null
+)
+
 data class Response(
     val status: Int,
     val headers: Map<String, String>? = null,
-    val json: String? = null
+    val json: String? = null,
+    val text: String? = null,
+    val schema: String? = null,
+    val jsonSchema: Any? = null,
+    val assertions: List<Assertion>? = null
+)
+
+data class GrpcRequest(
+    val service: String,
+    val method: String,
+    val message: Map<String, Any?>? = null,
+    val metadata: Map<String, String>? = null
+)
+
+data class GrpcResponse(
+    val code: String,
+    val message: String? = null,
+    val metadata: Map<String, String>? = null,
+    val assertions: List<Assertion>? = null
+)
+
+data class Assertion(
+    val path: String,
+    val operator: String,
+    val value: Any? = null,
+    val message: String? = null
 )
 
 data class MockServer(
@@ -87,11 +185,18 @@ object TestyYamlParser {
                 val nameKv = scenarioMapping.getKeyValueByKey("name") ?: return@forEach
                 val name = nameKv.valueText ?: return@forEach
                 
-                // Extract fixtures
+                val variablesKv = scenarioMapping.getKeyValueByKey("variables")
+                val variables = variablesKv?.value?.let { extractAnyMap(it as? YAMLMapping) }
+                
                 val fixturesKv = scenarioMapping.getKeyValueByKey("fixtures")
                 val fixtures = fixturesKv?.value?.let { extractStringList(it) }
                 
-                // Extract mockServers
+                val setupKv = scenarioMapping.getKeyValueByKey("setup")
+                val setup = setupKv?.value?.let { extractHooks(it) }
+                
+                val teardownKv = scenarioMapping.getKeyValueByKey("teardown")
+                val teardown = teardownKv?.value?.let { extractHooks(it) }
+                
                 val mockServersKv = scenarioMapping.getKeyValueByKey("mockServers")
                 val mockServers = mockServersKv?.value?.let { extractMockServers(it as? YAMLMapping) }
                 
@@ -105,7 +210,10 @@ object TestyYamlParser {
                 
                 result += TestyScenario(
                     name = name,
+                    variables = variables,
                     fixtures = fixtures,
+                    setup = setup,
+                    teardown = teardown,
                     mockServers = mockServers,
                     mockCalls = mockCalls,
                     steps = steps,
@@ -123,6 +231,43 @@ object TestyYamlParser {
             }
             else -> null
         }
+    }
+    
+    private fun extractHooks(value: YAMLValue?): List<Hook>? {
+        if (value !is YAMLSequence) return null
+        
+        return value.items.mapNotNull { item ->
+            val hookMapping = item.value as? YAMLMapping ?: return@mapNotNull null
+            
+            val nameKv = hookMapping.getKeyValueByKey("name")
+            val name = nameKv?.valueText
+            
+            val sqlKv = hookMapping.getKeyValueByKey("sql")
+            val sql = sqlKv?.valueText
+            
+            val httpKv = hookMapping.getKeyValueByKey("http")
+            val http = httpKv?.value?.let { extractHookHttp(it as? YAMLMapping) }
+            
+            Hook(name, sql, http)
+        }
+    }
+    
+    private fun extractHookHttp(mapping: YAMLMapping?): HookHttp? {
+        if (mapping == null) return null
+        
+        val methodKv = mapping.getKeyValueByKey("method") ?: return null
+        val method = methodKv.valueText ?: return null
+        
+        val pathKv = mapping.getKeyValueByKey("path") ?: return null
+        val path = pathKv.valueText ?: return null
+        
+        val headersKv = mapping.getKeyValueByKey("headers")
+        val headers = headersKv?.value?.let { extractStringMap(it as? YAMLMapping) }
+        
+        val bodyKv = mapping.getKeyValueByKey("body")
+        val body = bodyKv?.value?.let { extractBody(it) }
+        
+        return HookHttp(method, path, headers, body)
     }
     
     private fun extractMockServers(mapping: YAMLMapping?): Map<String, MockServer>? {
@@ -223,17 +368,115 @@ object TestyYamlParser {
             val nameKv = stepMapping.getKeyValueByKey("name") ?: return@mapNotNull null
             val name = nameKv.valueText ?: return@mapNotNull null
             
-            val requestKv = stepMapping.getKeyValueByKey("request") ?: return@mapNotNull null
-            val request = extractRequest(requestKv.value as? YAMLMapping) ?: return@mapNotNull null
+            val conditionKv = stepMapping.getKeyValueByKey("when")
+            val condition = conditionKv?.valueText
             
-            val responseKv = stepMapping.getKeyValueByKey("response") ?: return@mapNotNull null
-            val response = extractResponse(responseKv.value as? YAMLMapping) ?: return@mapNotNull null
+            val loopKv = stepMapping.getKeyValueByKey("loop")
+            val loop = loopKv?.value?.let { extractLoop(it as? YAMLMapping) }
+            
+            val retryKv = stepMapping.getKeyValueByKey("retry")
+            val retry = retryKv?.value?.let { extractRetry(it as? YAMLMapping) }
+            
+            val performanceKv = stepMapping.getKeyValueByKey("performance")
+            val performance = performanceKv?.value?.let { extractPerformance(it as? YAMLMapping) }
             
             val dbChecksKv = stepMapping.getKeyValueByKey("dbChecks")
             val dbChecks = dbChecksKv?.value?.let { extractDbChecks(it) }
             
-            TestyStep(name, request, response, dbChecks, stepOffset)
+            val requestKv = stepMapping.getKeyValueByKey("request")
+            val responseKv = stepMapping.getKeyValueByKey("response")
+            val grpcRequestKv = stepMapping.getKeyValueByKey("grpcRequest")
+            val grpcResponseKv = stepMapping.getKeyValueByKey("grpcResponse")
+            
+            when {
+                requestKv != null && responseKv != null -> {
+                    val request = extractRequest(requestKv.value as? YAMLMapping) ?: return@mapNotNull null
+                    val response = extractResponse(responseKv.value as? YAMLMapping) ?: return@mapNotNull null
+                    TestyStep.HttpStep(name, condition, loop, retry, performance, request, response, dbChecks, stepOffset)
+                }
+                grpcRequestKv != null && grpcResponseKv != null -> {
+                    val grpcRequest = extractGrpcRequest(grpcRequestKv.value as? YAMLMapping) ?: return@mapNotNull null
+                    val grpcResponse = extractGrpcResponse(grpcResponseKv.value as? YAMLMapping) ?: return@mapNotNull null
+                    TestyStep.GrpcStep(name, condition, loop, retry, performance, grpcRequest, grpcResponse, dbChecks, stepOffset)
+                }
+                else -> null
+            }
         }
+    }
+    
+    private fun extractLoop(mapping: YAMLMapping?): Loop? {
+        if (mapping == null) return null
+        
+        val varKv = mapping.getKeyValueByKey("var") ?: return null
+        val variable = varKv.valueText ?: return null
+        
+        val itemsKv = mapping.getKeyValueByKey("items")
+        val items = itemsKv?.value?.let { extractAnyList(it) }
+        
+        val rangeKv = mapping.getKeyValueByKey("range")
+        val range = rangeKv?.value?.let { extractLoopRange(it as? YAMLMapping) }
+        
+        return Loop(items, variable, range)
+    }
+    
+    private fun extractLoopRange(mapping: YAMLMapping?): LoopRange? {
+        if (mapping == null) return null
+        
+        val fromKv = mapping.getKeyValueByKey("from") ?: return null
+        val from = fromKv.valueText?.toIntOrNull() ?: return null
+        
+        val toKv = mapping.getKeyValueByKey("to") ?: return null
+        val to = toKv.valueText?.toIntOrNull() ?: return null
+        
+        val stepKv = mapping.getKeyValueByKey("step")
+        val step = stepKv?.valueText?.toIntOrNull() ?: 1
+        
+        return LoopRange(from, to, step)
+    }
+    
+    private fun extractRetry(mapping: YAMLMapping?): Retry? {
+        if (mapping == null) return null
+        
+        val attemptsKv = mapping.getKeyValueByKey("attempts") ?: return null
+        val attempts = attemptsKv.valueText?.toIntOrNull() ?: return null
+        
+        val backoffKv = mapping.getKeyValueByKey("backoff")
+        val backoff = backoffKv?.valueText
+        
+        val initialDelayKv = mapping.getKeyValueByKey("initialDelay")
+        val initialDelay = initialDelayKv?.valueText
+        
+        val maxDelayKv = mapping.getKeyValueByKey("maxDelay")
+        val maxDelay = maxDelayKv?.valueText
+        
+        val retryOnKv = mapping.getKeyValueByKey("retryOn")
+        val retryOn = retryOnKv?.value?.let { extractIntList(it) }
+        
+        val retryOnErrorKv = mapping.getKeyValueByKey("retryOnError")
+        val retryOnError = retryOnErrorKv?.valueText?.toBooleanStrictOrNull() ?: false
+        
+        return Retry(attempts, backoff, initialDelay, maxDelay, retryOn, retryOnError)
+    }
+    
+    private fun extractPerformance(mapping: YAMLMapping?): Performance? {
+        if (mapping == null) return null
+        
+        val maxDurationKv = mapping.getKeyValueByKey("maxDuration")
+        val maxDuration = maxDurationKv?.valueText
+        
+        val warnDurationKv = mapping.getKeyValueByKey("warnDuration")
+        val warnDuration = warnDurationKv?.valueText
+        
+        val failOnWarningKv = mapping.getKeyValueByKey("failOnWarning")
+        val failOnWarning = failOnWarningKv?.valueText?.toBooleanStrictOrNull() ?: false
+        
+        val maxMemoryKv = mapping.getKeyValueByKey("maxMemory")
+        val maxMemory = maxMemoryKv?.valueText?.toIntOrNull()
+        
+        val minThroughputKv = mapping.getKeyValueByKey("minThroughput")
+        val minThroughput = minThroughputKv?.valueText?.toIntOrNull()
+        
+        return Performance(maxDuration, warnDuration, failOnWarning, maxMemory, minThroughput)
     }
     
     private fun extractRequest(mapping: YAMLMapping?): Request? {
@@ -251,7 +494,13 @@ object TestyYamlParser {
         val bodyKv = mapping.getKeyValueByKey("body")
         val body = bodyKv?.value?.let { extractBody(it) }
         
-        return Request(method, path, headers, body)
+        val bodyFileKv = mapping.getKeyValueByKey("bodyFile")
+        val bodyFile = bodyFileKv?.valueText
+        
+        val bodyRawKv = mapping.getKeyValueByKey("bodyRaw")
+        val bodyRaw = bodyRawKv?.valueText
+        
+        return Request(method, path, headers, body, bodyFile, bodyRaw)
     }
     
     private fun extractResponse(mapping: YAMLMapping?): Response? {
@@ -266,7 +515,77 @@ object TestyYamlParser {
         val jsonKv = mapping.getKeyValueByKey("json")
         val json = jsonKv?.valueText
         
-        return Response(status, headers, json)
+        val textKv = mapping.getKeyValueByKey("text")
+        val text = textKv?.valueText
+        
+        val schemaKv = mapping.getKeyValueByKey("schema")
+        val schema = schemaKv?.valueText
+        
+        val jsonSchemaKv = mapping.getKeyValueByKey("jsonSchema")
+        val jsonSchema = jsonSchemaKv?.value?.let { extractBody(it) }
+        
+        val assertionsKv = mapping.getKeyValueByKey("assertions")
+        val assertions = assertionsKv?.value?.let { extractAssertions(it) }
+        
+        return Response(status, headers, json, text, schema, jsonSchema, assertions)
+    }
+    
+    private fun extractGrpcRequest(mapping: YAMLMapping?): GrpcRequest? {
+        if (mapping == null) return null
+        
+        val serviceKv = mapping.getKeyValueByKey("service") ?: return null
+        val service = serviceKv.valueText ?: return null
+        
+        val methodKv = mapping.getKeyValueByKey("method") ?: return null
+        val method = methodKv.valueText ?: return null
+        
+        val messageKv = mapping.getKeyValueByKey("message")
+        val message = messageKv?.value?.let { extractAnyMap(it as? YAMLMapping) }
+        
+        val metadataKv = mapping.getKeyValueByKey("metadata")
+        val metadata = metadataKv?.value?.let { extractStringMap(it as? YAMLMapping) }
+        
+        return GrpcRequest(service, method, message, metadata)
+    }
+    
+    private fun extractGrpcResponse(mapping: YAMLMapping?): GrpcResponse? {
+        if (mapping == null) return null
+        
+        val codeKv = mapping.getKeyValueByKey("code") ?: return null
+        val code = codeKv.valueText ?: return null
+        
+        val messageKv = mapping.getKeyValueByKey("message")
+        val message = messageKv?.valueText
+        
+        val metadataKv = mapping.getKeyValueByKey("metadata")
+        val metadata = metadataKv?.value?.let { extractStringMap(it as? YAMLMapping) }
+        
+        val assertionsKv = mapping.getKeyValueByKey("assertions")
+        val assertions = assertionsKv?.value?.let { extractAssertions(it) }
+        
+        return GrpcResponse(code, message, metadata, assertions)
+    }
+    
+    private fun extractAssertions(value: YAMLValue?): List<Assertion>? {
+        if (value !is YAMLSequence) return null
+        
+        return value.items.mapNotNull { item ->
+            val assertionMapping = item.value as? YAMLMapping ?: return@mapNotNull null
+            
+            val pathKv = assertionMapping.getKeyValueByKey("path") ?: return@mapNotNull null
+            val path = pathKv.valueText ?: return@mapNotNull null
+            
+            val operatorKv = assertionMapping.getKeyValueByKey("operator") ?: return@mapNotNull null
+            val operator = operatorKv.valueText ?: return@mapNotNull null
+            
+            val valueKv = assertionMapping.getKeyValueByKey("value")
+            val assertionValue = valueKv?.value?.let { extractBody(it) }
+            
+            val messageKv = assertionMapping.getKeyValueByKey("message")
+            val message = messageKv?.valueText
+            
+            Assertion(path, operator, assertionValue, message)
+        }
     }
     
     private fun extractDbChecks(value: YAMLValue?): List<DbCheck>? {
@@ -291,11 +610,39 @@ object TestyYamlParser {
         mapping.keyValues.forEach { kv ->
             val key = kv.keyText
             val value = kv.valueText
-            if (key != null && value != null) {
+            if (key.isNotEmpty() && value != null) {
                 result[key] = value
             }
         }
         return result.ifEmpty { null }
+    }
+    
+    private fun extractAnyMap(mapping: YAMLMapping?): Map<String, Any?>? {
+        if (mapping == null) return null
+        
+        val result = mutableMapOf<String, Any?>()
+        mapping.keyValues.forEach { kv ->
+            val key = kv.keyText ?: return@forEach
+            val value = kv.value?.let { extractBody(it) }
+            result[key] = value
+        }
+        return result.ifEmpty { null }
+    }
+    
+    private fun extractAnyList(value: YAMLValue?): List<Any>? {
+        if (value !is YAMLSequence) return null
+        
+        return value.items.mapNotNull { item ->
+            item.value?.let { extractBody(it) }
+        }
+    }
+    
+    private fun extractIntList(value: YAMLValue?): List<Int>? {
+        if (value !is YAMLSequence) return null
+        
+        return value.items.mapNotNull { item ->
+            item.value?.text?.trim()?.toIntOrNull()
+        }
     }
     
     private fun extractBody(value: YAMLValue?): Any? {

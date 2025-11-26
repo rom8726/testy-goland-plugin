@@ -32,11 +32,18 @@ import java.util.TimerTask
 sealed class TreeNodeData {
     data class Root(val fileName: String, val scenarioCount: Int, val errorCount: Int) : TreeNodeData()
     data class Scenario(val scenario: TestyScenario, val errorCount: Int) : TreeNodeData()
-    data class Step(val step: TestyStep) : TreeNodeData()
+    data class HttpStep(val step: TestyStep.HttpStep) : TreeNodeData()
+    data class GrpcStep(val step: TestyStep.GrpcStep) : TreeNodeData()
     data class DbChecksGroup(val checks: List<DbCheck>) : TreeNodeData()
     data class DbCheckItem(val check: DbCheck, val index: Int) : TreeNodeData()
     data class FixturesSummary(val count: Int) : TreeNodeData()
     data class MocksSummary(val serverCount: Int, val routeCount: Int) : TreeNodeData()
+    data class SetupGroup(val hooks: List<Hook>) : TreeNodeData()
+    data class TeardownGroup(val hooks: List<Hook>) : TreeNodeData()
+    data class HookItem(val hook: Hook, val index: Int) : TreeNodeData()
+    data class VariablesSummary(val count: Int) : TreeNodeData()
+    data class AssertionsGroup(val assertions: List<Assertion>) : TreeNodeData()
+    data class AssertionItem(val assertion: Assertion, val index: Int) : TreeNodeData()
     data class ErrorsGroup(val errors: List<ValidationError>) : TreeNodeData()
     data class Error(val error: ValidationError) : TreeNodeData()
 }
@@ -103,10 +110,13 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
             val nodeData = selectedNode.userObject as? TreeNodeData ?: return@addTreeSelectionListener
             
             when (nodeData) {
-                is TreeNodeData.Step -> detailsPanel.showStep(nodeData.step)
+                is TreeNodeData.HttpStep -> detailsPanel.showHttpStep(nodeData.step)
+                is TreeNodeData.GrpcStep -> detailsPanel.showGrpcStep(nodeData.step)
                 is TreeNodeData.DbCheckItem -> detailsPanel.showDbCheck(nodeData.check, nodeData.index)
                 is TreeNodeData.Scenario -> detailsPanel.showScenario(nodeData.scenario)
                 is TreeNodeData.Error -> detailsPanel.showError(nodeData.error)
+                is TreeNodeData.HookItem -> detailsPanel.showHook(nodeData.hook, nodeData.index)
+                is TreeNodeData.AssertionItem -> detailsPanel.showAssertion(nodeData.assertion, nodeData.index)
                 is TreeNodeData.MocksSummary -> {
                     // Try to find the scenario
                     val scenarioNode = findParentScenarioNode(selectedPath)
@@ -213,7 +223,7 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
         for (i in pathArray.size - 1 downTo 0) {
             val node = pathArray[i] as? DefaultMutableTreeNode ?: continue
             val nodeData = node.userObject as? TreeNodeData
-            if (nodeData is TreeNodeData.Step) {
+            if (nodeData is TreeNodeData.HttpStep || nodeData is TreeNodeData.GrpcStep) {
                 return node
             }
         }
@@ -239,11 +249,16 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
         
         val offset = when (nodeData) {
             is TreeNodeData.Scenario -> nodeData.scenario.offset
-            is TreeNodeData.Step -> nodeData.step.offset
+            is TreeNodeData.HttpStep -> nodeData.step.offset
+            is TreeNodeData.GrpcStep -> nodeData.step.offset
             is TreeNodeData.DbCheckItem -> {
                 // Try to find the step that contains this dbCheck
                 val stepNode = findParentStepNode(selectedPath) ?: return
-                (stepNode.userObject as? TreeNodeData.Step)?.step?.offset
+                when (val stepData = stepNode.userObject) {
+                    is TreeNodeData.HttpStep -> stepData.step.offset
+                    is TreeNodeData.GrpcStep -> stepData.step.offset
+                    else -> null
+                }
             }
             is TreeNodeData.Error -> nodeData.error.offset
             else -> null
@@ -397,22 +412,94 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
             
             val scenarioNode = DefaultMutableTreeNode(TreeNodeData.Scenario(scenario, scenarioErrorCount))
             
+            // Variables summary
+            scenario.variables?.let { vars ->
+                if (vars.isNotEmpty()) {
+                    val variablesNode = DefaultMutableTreeNode(TreeNodeData.VariablesSummary(vars.size))
+                    scenarioNode.add(variablesNode)
+                }
+            }
+            
+            // Setup hooks
+            scenario.setup?.let { hooks ->
+                if (hooks.isNotEmpty()) {
+                    val setupNode = DefaultMutableTreeNode(TreeNodeData.SetupGroup(hooks))
+                    hooks.forEachIndexed { hookIndex, hook ->
+                        setupNode.add(DefaultMutableTreeNode(TreeNodeData.HookItem(hook, hookIndex)))
+                    }
+                    scenarioNode.add(setupNode)
+                }
+            }
+            
             // Steps
             scenario.steps.forEach { step ->
-                val stepNode = DefaultMutableTreeNode(TreeNodeData.Step(step))
-                
-                // DbChecks for this step
-                step.dbChecks?.let { dbChecks ->
-                    if (dbChecks.isNotEmpty()) {
-                        val dbChecksNode = DefaultMutableTreeNode(TreeNodeData.DbChecksGroup(dbChecks))
-                        dbChecks.forEachIndexed { index, check ->
-                            dbChecksNode.add(DefaultMutableTreeNode(TreeNodeData.DbCheckItem(check, index)))
+                when (step) {
+                    is TestyStep.HttpStep -> {
+                        val stepNode = DefaultMutableTreeNode(TreeNodeData.HttpStep(step))
+                        
+                        // Assertions for HTTP response
+                        step.response.assertions?.let { assertions ->
+                            if (assertions.isNotEmpty()) {
+                                val assertionsNode = DefaultMutableTreeNode(TreeNodeData.AssertionsGroup(assertions))
+                                assertions.forEachIndexed { assertionIndex, assertion ->
+                                    assertionsNode.add(DefaultMutableTreeNode(TreeNodeData.AssertionItem(assertion, assertionIndex)))
+                                }
+                                stepNode.add(assertionsNode)
+                            }
                         }
-                        stepNode.add(dbChecksNode)
+                        
+                        // DbChecks for this step
+                        step.dbChecks?.let { dbChecks ->
+                            if (dbChecks.isNotEmpty()) {
+                                val dbChecksNode = DefaultMutableTreeNode(TreeNodeData.DbChecksGroup(dbChecks))
+                                dbChecks.forEachIndexed { dbCheckIndex, check ->
+                                    dbChecksNode.add(DefaultMutableTreeNode(TreeNodeData.DbCheckItem(check, dbCheckIndex)))
+                                }
+                                stepNode.add(dbChecksNode)
+                            }
+                        }
+                        
+                        scenarioNode.add(stepNode)
+                    }
+                    is TestyStep.GrpcStep -> {
+                        val stepNode = DefaultMutableTreeNode(TreeNodeData.GrpcStep(step))
+                        
+                        // Assertions for gRPC response
+                        step.grpcResponse.assertions?.let { assertions ->
+                            if (assertions.isNotEmpty()) {
+                                val assertionsNode = DefaultMutableTreeNode(TreeNodeData.AssertionsGroup(assertions))
+                                assertions.forEachIndexed { assertionIndex, assertion ->
+                                    assertionsNode.add(DefaultMutableTreeNode(TreeNodeData.AssertionItem(assertion, assertionIndex)))
+                                }
+                                stepNode.add(assertionsNode)
+                            }
+                        }
+                        
+                        // DbChecks for this step
+                        step.dbChecks?.let { dbChecks ->
+                            if (dbChecks.isNotEmpty()) {
+                                val dbChecksNode = DefaultMutableTreeNode(TreeNodeData.DbChecksGroup(dbChecks))
+                                dbChecks.forEachIndexed { dbCheckIndex, check ->
+                                    dbChecksNode.add(DefaultMutableTreeNode(TreeNodeData.DbCheckItem(check, dbCheckIndex)))
+                                }
+                                stepNode.add(dbChecksNode)
+                            }
+                        }
+                        
+                        scenarioNode.add(stepNode)
                     }
                 }
-                
-                scenarioNode.add(stepNode)
+            }
+            
+            // Teardown hooks
+            scenario.teardown?.let { hooks ->
+                if (hooks.isNotEmpty()) {
+                    val teardownNode = DefaultMutableTreeNode(TreeNodeData.TeardownGroup(hooks))
+                    hooks.forEachIndexed { hookIndex, hook ->
+                        teardownNode.add(DefaultMutableTreeNode(TreeNodeData.HookItem(hook, hookIndex)))
+                    }
+                    scenarioNode.add(teardownNode)
+                }
             }
             
             // Fixtures summary
@@ -513,19 +600,41 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
         val nodeData = node.userObject as? TreeNodeData ?: return null
         
         return when (nodeData) {
-            is TreeNodeData.Step -> {
+            is TreeNodeData.HttpStep -> {
                 val formatter = TestyDataFormatter
-                val preview = "Request: ${nodeData.step.request.method} ${nodeData.step.request.path}\n" +
-                        "Response: ${nodeData.step.response.status}\n" +
-                        if (nodeData.step.request.body != null) {
-                            "Body: ${formatter.truncate(nodeData.step.request.body.toString(), 100)}"
-                        } else {
-                            ""
-                        }
+                val preview = buildString {
+                    append("Request: ${nodeData.step.request.method} ${nodeData.step.request.path}\n")
+                    append("Response: ${nodeData.step.response.status}")
+                    nodeData.step.condition?.let { append("\nCondition: $it") }
+                    nodeData.step.loop?.let { append("\nLoop: var=${it.variable}") }
+                    nodeData.step.retry?.let { append("\nRetry: ${it.attempts} attempts") }
+                    if (nodeData.step.request.body != null) {
+                        append("\nBody: ${formatter.truncate(nodeData.step.request.body.toString(), 100)}")
+                    }
+                }
                 preview.trim()
+            }
+            is TreeNodeData.GrpcStep -> {
+                buildString {
+                    append("gRPC: ${nodeData.step.grpcRequest.service}/${nodeData.step.grpcRequest.method}\n")
+                    append("Response: ${nodeData.step.grpcResponse.code}")
+                    nodeData.step.condition?.let { append("\nCondition: $it") }
+                    nodeData.step.loop?.let { append("\nLoop: var=${it.variable}") }
+                    nodeData.step.retry?.let { append("\nRetry: ${it.attempts} attempts") }
+                }.trim()
             }
             is TreeNodeData.DbCheckItem -> {
                 "Query: ${TestyDataFormatter.truncate(nodeData.check.query, 150)}"
+            }
+            is TreeNodeData.HookItem -> {
+                buildString {
+                    nodeData.hook.name?.let { append("Name: $it\n") }
+                    nodeData.hook.sql?.let { append("SQL: ${TestyDataFormatter.truncate(it, 100)}") }
+                    nodeData.hook.http?.let { append("HTTP: ${it.method} ${it.path}") }
+                }.trim()
+            }
+            is TreeNodeData.AssertionItem -> {
+                "Path: ${nodeData.assertion.path}\nOperator: ${nodeData.assertion.operator}\nValue: ${nodeData.assertion.value}"
             }
             is TreeNodeData.Error -> {
                 nodeData.error.message
@@ -557,7 +666,7 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
                     append(node.fileName, SimpleTextAttributes.REGULAR_ATTRIBUTES)
                     append(" (${node.scenarioCount} scenarios", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                     if (node.errorCount > 0) {
-                        append(", $node.errorCount errors", SimpleTextAttributes.ERROR_ATTRIBUTES)
+                        append(", ${node.errorCount} errors", SimpleTextAttributes.ERROR_ATTRIBUTES)
                     }
                     append(")", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 }
@@ -566,11 +675,11 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
                     icon = AllIcons.Nodes.TestSourceFolder
                     append(node.scenario.name, SimpleTextAttributes.REGULAR_ATTRIBUTES)
                     if (node.errorCount > 0) {
-                        append(" ($node.errorCount errors)", SimpleTextAttributes.ERROR_ATTRIBUTES)
+                        append(" (${node.errorCount} errors)", SimpleTextAttributes.ERROR_ATTRIBUTES)
                     }
                 }
                 
-                is TreeNodeData.Step -> {
+                is TreeNodeData.HttpStep -> {
                     val method = node.step.request.method
                     val methodColor = MethodBadgeRenderer.getMethodColor(method)
                     val status = node.step.response.status
@@ -581,6 +690,45 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
                     append(node.step.request.path, SimpleTextAttributes.REGULAR_ATTRIBUTES)
                     append(" → ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
                     append("$status", SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, statusColor))
+                    
+                    // Show indicators for special features
+                    node.step.condition?.let { 
+                        append(" ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        append("[when]", SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, JBColor.BLUE))
+                    }
+                    node.step.loop?.let {
+                        append(" ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        append("[loop]", SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, JBColor.ORANGE))
+                    }
+                    node.step.retry?.let {
+                        append(" ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        append("[retry]", SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, JBColor.CYAN))
+                    }
+                }
+                
+                is TreeNodeData.GrpcStep -> {
+                    val grpcColor = Color(0x4CAF50) // Green for gRPC
+                    val code = node.step.grpcResponse.code
+                    val codeColor = getGrpcCodeColor(code)
+                    
+                    append("gRPC ", SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, grpcColor))
+                    append("${node.step.grpcRequest.service}/", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    append(node.step.grpcRequest.method, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                    append(" → ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    append(code, SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, codeColor))
+                    
+                    node.step.condition?.let {
+                        append(" ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        append("[when]", SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, JBColor.BLUE))
+                    }
+                    node.step.loop?.let {
+                        append(" ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        append("[loop]", SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, JBColor.ORANGE))
+                    }
+                    node.step.retry?.let {
+                        append(" ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        append("[retry]", SimpleTextAttributes(SimpleTextAttributes.STYLE_ITALIC, JBColor.CYAN))
+                    }
                 }
                 
                 is TreeNodeData.DbChecksGroup -> {
@@ -610,6 +758,59 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
                         SimpleTextAttributes.GRAYED_ATTRIBUTES)
                 }
                 
+                is TreeNodeData.VariablesSummary -> {
+                    icon = AllIcons.Nodes.Variable
+                    append("variables: ${node.count}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                }
+                
+                is TreeNodeData.SetupGroup -> {
+                    icon = AllIcons.Actions.Execute
+                    append("setup (${node.hooks.size})", SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, Color(0x4CAF50)))
+                }
+                
+                is TreeNodeData.TeardownGroup -> {
+                    icon = AllIcons.Actions.Suspend
+                    append("teardown (${node.hooks.size})", SimpleTextAttributes(SimpleTextAttributes.STYLE_PLAIN, Color(0xFF9800)))
+                }
+                
+                is TreeNodeData.HookItem -> {
+                    val hook = node.hook
+                    when {
+                        hook.sql != null -> {
+                            icon = AllIcons.Nodes.DataTables
+                            val name = hook.name ?: "SQL"
+                            append("[$name] ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                            append(TestyDataFormatter.truncate(hook.sql, 40), SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                        }
+                        hook.http != null -> {
+                            icon = AllIcons.Nodes.Method
+                            val name = hook.name ?: "HTTP"
+                            val methodColor = MethodBadgeRenderer.getMethodColor(hook.http.method)
+                            append("[$name] ", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                            append("${hook.http.method} ", SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, methodColor))
+                            append(hook.http.path, SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                        }
+                        else -> {
+                            icon = AllIcons.General.Warning
+                            append("[${node.index}] Unknown hook", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                        }
+                    }
+                }
+                
+                is TreeNodeData.AssertionsGroup -> {
+                    icon = AllIcons.Debugger.Watch
+                    append("assertions (${node.assertions.size})", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                }
+                
+                is TreeNodeData.AssertionItem -> {
+                    icon = AllIcons.Debugger.WatchLastReturnValue
+                    append("${node.assertion.path} ", SimpleTextAttributes.REGULAR_ATTRIBUTES)
+                    append(node.assertion.operator, SimpleTextAttributes(SimpleTextAttributes.STYLE_BOLD, JBColor.BLUE))
+                    node.assertion.value?.let {
+                        append(" ${TestyDataFormatter.truncate(it.toString(), 30)}", SimpleTextAttributes.GRAYED_ATTRIBUTES)
+                    }
+                }
+                
                 is TreeNodeData.ErrorsGroup -> {
                     icon = AllIcons.General.Error
                     append("Problems (${node.errors.size})", SimpleTextAttributes.ERROR_ATTRIBUTES)
@@ -636,9 +837,21 @@ class TestyViewerPanel(project: Project, file: VirtualFile) : JPanel(), Disposab
         
         private fun getStatusColor(status: Int): Color {
             return when {
-                status in 200..299 -> Color(0x4CAF50) // Green
-                status in 400..499 -> Color(0xFF9800) // Orange
-                status in 500..599 -> Color(0xF44336) // Red
+                status in 200..299 -> Color(0x4CAF50)
+                status in 400..499 -> Color(0xFF9800)
+                status in 500..599 -> Color(0xF44336)
+                else -> JBColor.GRAY
+            }
+        }
+        
+        private fun getGrpcCodeColor(code: String): Color {
+            return when (code.uppercase()) {
+                "OK" -> Color(0x4CAF50)
+                "CANCELLED", "DEADLINE_EXCEEDED", "UNAVAILABLE" -> Color(0xFF9800)
+                "UNKNOWN", "INVALID_ARGUMENT", "NOT_FOUND", "ALREADY_EXISTS",
+                "PERMISSION_DENIED", "RESOURCE_EXHAUSTED", "FAILED_PRECONDITION",
+                "ABORTED", "OUT_OF_RANGE", "UNIMPLEMENTED", "INTERNAL",
+                "DATA_LOSS", "UNAUTHENTICATED" -> Color(0xF44336)
                 else -> JBColor.GRAY
             }
         }
