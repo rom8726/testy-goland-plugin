@@ -1,6 +1,6 @@
 # Testy GoLand Plugin
 
-Visual viewer for Testy YAML test scenarios in GoLand IDE. Provides structured tree view, schema validation, and color-coded HTTP methods and status codes.
+Visual viewer for Testy YAML test scenarios in GoLand IDE. Provides structured tree view, schema validation, and color-coded HTTP, gRPC methods and status codes.
 
 ## Features
 
