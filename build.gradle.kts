@@ -1,57 +1,46 @@
 plugins {
-    id("org.jetbrains.intellij") version "1.17.1"
+    id("org.jetbrains.intellij.platform") version "2.16.0"
     kotlin("jvm") version "2.2.0"
 }
 
 
 group = "com.testy"
-version = "0.3.0"
+version = "0.3.1"
 
 repositories {
     mavenCentral()
+    intellijPlatform {
+        defaultRepositories()
+    }
 }
 
-intellij {
-    // GoLand 2025.2
-    type.set("GO")
-    version.set("2025.2")
-
-    plugins.set(listOf(
-        "org.jetbrains.plugins.go",
-        "org.jetbrains.plugins.yaml",
-    ))
-}
-
-tasks {
-    patchPluginXml {
-        version.set("${project.version}")
-        sinceBuild.set("252.0")
-        untilBuild.set("253.*")
-    }
-
-    buildPlugin {
-        archiveFileName.set("testy-goland-plugin.zip")
-    }
-
-    runIde {
-        val userHome = System.getProperty("user.home")
-        val macIdeContents = file("$userHome/Applications/GoLand.app/Contents")
-        if (macIdeContents.exists()) {
-            ideDir.set(macIdeContents)
+intellijPlatform {
+    pluginConfiguration {
+        version = "${project.version}"
+        ideaVersion {
+            sinceBuild = "252.0"
+            untilBuild = "261.*"
         }
     }
 
-    buildSearchableOptions {
-        enabled = false
+    pluginVerification {
+        ides {
+            providers.gradleProperty("verificationIdePath").orNull?.let {
+                local(file(it))
+            } ?: current()
+        }
     }
 
-    test {
-        // Disable default Gradle test task since IntelliJ Gradle plugin injects IDE args that break pure unit tests
-        enabled = false
-    }
+    buildSearchableOptions = false
 }
 
 dependencies {
+    intellijPlatform {
+        goland("2025.2")
+        bundledPlugin("org.jetbrains.plugins.go")
+        bundledPlugin("org.jetbrains.plugins.yaml")
+    }
+
     implementation("net.sourceforge.plantuml:plantuml:1.2024.5")
     // YAML parsing
     implementation("org.yaml:snakeyaml:2.2")
@@ -66,10 +55,23 @@ dependencies {
     testRuntimeOnly("org.junit.platform:junit-platform-console:1.11.3")
 }
 
+tasks {
+    buildPlugin {
+        archiveFileName.set("testy-goland-plugin.zip")
+    }
+
+    test {
+        // Disable default Gradle test task since IntelliJ Gradle plugin injects IDE args that break pure unit tests
+        enabled = false
+    }
+}
+
 tasks.register<JavaExec>("unitTest") {
     group = "verification"
     description = "Runs unit tests via JUnit ConsoleLauncher"
-    classpath = sourceSets.test.get().runtimeClasspath
+    classpath = sourceSets.test.get().runtimeClasspath +
+        configurations["testCompileClasspath"] +
+        configurations["intellijPlatformTestRuntimeClasspath"]
     mainClass.set("org.junit.platform.console.ConsoleLauncher")
-    args("--scan-classpath")
+    args("--scan-classpath", "--include-classname", ".*Test$")
 }

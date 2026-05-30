@@ -2,12 +2,15 @@
   <id>com.testy.tests.viewer</id>
   <name>Testy Tests Viewer</name>
   <vendor email="roman.chudov@gmail.com" url="https://github.com/rom8726/testy-goland-plugin">Chudov Roman</vendor>
-  <version>0.3.0</version>
-  <idea-version since-build="252.0" until-build="253.*"/>
+  <version>0.3.1</version>
+  <idea-version since-build="252.0" until-build="261.*"/>
   <description><![CDATA[
     Visual viewer for Testy YAML scenarios — provides structured tree and color highlighting.
   ]]></description>
   <change-notes><![CDATA[
+    0.3.1
+    - GoLand 2026.1 support added.
+
     0.3.0
     - testy v2 support added: gRPC request\response, variables, asserts, etc.
   ]]></change-notes>
